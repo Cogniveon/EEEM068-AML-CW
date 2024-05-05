@@ -1,0 +1,27 @@
+[project]
+name = "eeem068-aml-cw"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Rohit Krishnan", email = "rohit.k.kesavan@gmail.com" }
+]
+dependencies = [
+  "torch==2.2.2",
+  "torchvision==0.17.2",
+  "accelerate==0.30.0",
+  "transformers==4.40.1",
+  "datasets==2.19.0",
+  "tensorboardx==2.6.2.2",
+  "matplotlib","rich", "torchmetrics", "omegaconf"
+]
+readme = "README.md"
+requires-python = ">= 3.8"
+
+[tool.rye]
+managed = true
+virtual = true
+dev-dependencies = [
+  "black==24.4.2",
+  "isort==5.13.2",
+  "gdown==5.1.0"
+]
