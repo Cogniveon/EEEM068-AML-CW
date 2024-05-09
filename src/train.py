@@ -96,7 +96,16 @@ def main():
     set_seed(config.seed)
 
     tblogger = SummaryWriter(config.log_dir)
-    tblogger.add_text("hparams", OmegaConf.to_yaml(config), global_step=0)
+    tblogger.add_text(
+        "hparams",
+        """```yaml
+{yaml}
+```
+""".format(
+            yaml=OmegaConf.to_yaml(config, resolve=True)
+        ),
+        global_step=0,
+    )
     log.info(f"Configuration: {OmegaConf.to_container(config, resolve=True)}")
 
     accelerator = Accelerator()
