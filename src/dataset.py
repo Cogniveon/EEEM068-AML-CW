@@ -14,12 +14,13 @@ log = logging.getLogger(__name__)
 
 
 class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
+
     def __init__(
         self,
         path: str | os.PathLike,
-        transform: Optional[VideoMAEImageProcessor] = None,
+        processor: Optional[VideoMAEImageProcessor] = None,
     ):
-        self._transform = transform
+        self._processor = processor
 
         log.info("Initializing HMDB_simp dataset")
         self.dataset: list[tuple[np.ndarray, int]] = []
@@ -64,7 +65,7 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             image = Image.open(path)
             pil_images.append(image)
 
-        if self._transform:
+        if self._processor != None:
             image_transform = T.Compose(
                 [
                     T.Resize((224, 224)),
@@ -72,7 +73,7 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
                     T.ToDtype(torch.float, scale=True),
                 ]
             )
-            tensors = self._transform.preprocess(pil_images).pixel_values
+            tensors = self._processor.preprocess(pil_images).pixel_values
             tensors = torch.stack([image_transform(image) for image in pil_images])
 
         return tensors, torch.tensor(label)
