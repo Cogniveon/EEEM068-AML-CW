@@ -89,9 +89,12 @@ def prepare_dataloaders(
     return train_dataloader, val_dataloader, test_dataloader
 
 
-def main():
+def main(config: ListConfig | DictConfig | None = None):
     """Main function."""
-    config = utils.get_config()
+
+    if config is None:
+        config = utils.get_config()
+
     utils.setup_logging(config)
     set_seed(config.seed)
 
