@@ -193,7 +193,6 @@ def main(config: ListConfig | DictConfig | None = None):
                         pbar.set_postfix(
                             {
                                 f"val/{metric.__class__.__name__.lower()}": accuracy,
-                                "lr": scheduler.get_last_lr(),
                             }
                         )
 
@@ -206,6 +205,24 @@ def main(config: ListConfig | DictConfig | None = None):
             metric.reset()
             scheduler.step()
 
+    with tqdm(
+        enumerate(test_dataloader),
+        total=len(test_dataloader),
+        desc=f"Testing",
+    ) as pbar:
+        for idx, batch in pbar:
+            accuracy = eval_step(model, batch, metric)
+            pbar.set_postfix(
+                {
+                    f"test/{metric.__class__.__name__.lower()}": accuracy,
+                }
+            )
+
+        tblogger.add_scalar(
+            f"test/{metric.__class__.__name__.lower()}",
+            metric.compute().cpu().item(),
+            global_step=global_step,
+        )
 
 if __name__ == "__main__":
     main()
