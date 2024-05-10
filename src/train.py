@@ -181,9 +181,14 @@ def main(config: ListConfig | DictConfig | None = None):
                             "lr", scheduler.get_last_lr(), global_step=idx
                         )
 
-                if epoch % config.eval_freq == 0 or epoch == config.num_epochs - 1:
-                    global_step += 1
-                    for batch in val_dataloader:
+            if epoch % config.eval_freq == 0 or epoch == config.num_epochs - 1:
+                global_step += 1
+                with tqdm(
+                    enumerate(val_dataloader),
+                    total=len(val_dataloader),
+                    desc=f"Validating {epoch + 1}",
+                ) as pbar:
+                    for idx, batch in pbar:
                         accuracy = eval_step(model, batch, metric)
                         pbar.set_postfix(
                             {
@@ -198,8 +203,8 @@ def main(config: ListConfig | DictConfig | None = None):
                         global_step=global_step,
                     )
 
-                metric.reset()
-                scheduler.step()
+            metric.reset()
+            scheduler.step()
 
 
 if __name__ == "__main__":
