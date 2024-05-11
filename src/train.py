@@ -43,6 +43,7 @@ def eval_step(
     batch: tuple[torch.Tensor, torch.Tensor],
     loss_fn: torch.nn.Module | Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     accuracy: Metric,
+    accuracy5: Metric,
     confusion_matrix: Optional[Metric] = None,
 ):
     """Evaluation step."""
@@ -52,9 +53,13 @@ def eval_step(
     loss = loss_fn(outputs.logits, targets)
     preds = outputs.logits.argmax(-1)
     accuracy.update(preds, targets)
+    accuracy5.update(
+        torch.nn.functional.softmax(outputs.logits, dim=-1),
+        targets,
+    )
     if confusion_matrix is not None:
         confusion_matrix.update(preds, targets)
-    return loss, accuracy.compute()
+    return loss, accuracy.compute(), accuracy5.compute()
 
 
 def prepare_dataloaders(
@@ -65,7 +70,7 @@ def prepare_dataloaders(
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Prepare dataloaders."""
     log.info(f"Preparing dataloaders with splits: {dataset_splits}")
-    train_dataset, val_dataset, test_dataset = random_split(dataset, dataset_splits[:3])
+    train_dataset, val_dataset, test_dataset = random_split(dataset, dataset_splits)[:3]
 
     train_dataloader = accelerator.prepare_data_loader(
         DataLoader(
@@ -169,6 +174,11 @@ def main(config: ListConfig | DictConfig | None = None):
         task="multiclass",
         num_classes=dataset.num_classes or -1,
     ).to(accelerator.device)
+    accuracy5 = Accuracy(
+        task="multiclass",
+        top_k=5,
+        num_classes=dataset.num_classes or -1,
+    ).to(accelerator.device)
     train_loss = torchmetrics.MeanMetric().to(accelerator.device)
     val_loss = torchmetrics.MeanMetric().to(accelerator.device)
     test_loss = torchmetrics.MeanMetric().to(accelerator.device)
@@ -219,11 +229,15 @@ def main(config: ListConfig | DictConfig | None = None):
 
                     if idx % max(int(len(train_dataloader) / config.log_freq), 1) == 0:
                         tblogger.add_scalar(
-                            "train/loss", train_loss.compute(), global_step=idx
+                            "train/loss",
+                            train_loss.compute(),
+                            global_step=global_step,
                         )
                         train_loss.reset()
                         tblogger.add_scalar(
-                            "lr", scheduler.get_last_lr()[0], global_step=global_step
+                            "lr",
+                            scheduler.get_last_lr()[0],
+                            global_step=global_step,
                         )
                         tblogger.flush()
 
@@ -236,11 +250,15 @@ def main(config: ListConfig | DictConfig | None = None):
                     random_index = torch.randint(0, len(val_dataloader), (1,)).item()
                     for idx, batch in pbar:
                         global_step += 1
-                        loss, acc = eval_step(model, batch, loss_fn, accuracy)
+                        loss, acc, acc5 = eval_step(
+                            model, batch, loss_fn, accuracy, accuracy5
+                        )
                         val_loss.update(loss.item())
                         pbar.set_postfix(
                             {
-                                "val/accuracy": acc.cpu().item(),
+                                "val/loss": val_loss.compute().cpu().item(),
+                                "val/acc": acc.cpu().item(),
+                                "val/acc5": acc5.cpu().item(),
                             }
                         )
 
@@ -262,8 +280,13 @@ def main(config: ListConfig | DictConfig | None = None):
                             == 0
                         ):
                             tblogger.add_scalar(
-                                f"val/accuracy",
+                                f"val/acc",
                                 acc.cpu().item(),
+                                global_step=global_step,
+                            )
+                            tblogger.add_scalar(
+                                f"val/acc5",
+                                acc5.cpu().item(),
                                 global_step=global_step,
                             )
 
@@ -273,9 +296,12 @@ def main(config: ListConfig | DictConfig | None = None):
                             val_loss.reset()
                             tblogger.flush()
 
-                    log.info(f"Accuracy: {accuracy.compute()}")
+                    log.info(f"Accuracy: {acc.cpu().item()}")
+                    log.info(f"Accuracy@5: {acc5.cpu().item()}")
                     accuracy.reset()
+                    accuracy5.reset()
 
+                log.info(f"Saving checkpoint for epoch: {epoch}")
                 accelerator.save_state(
                     os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
                 )
@@ -291,21 +317,30 @@ def main(config: ListConfig | DictConfig | None = None):
     ) as pbar:
         random_index = torch.randint(0, len(test_dataloader), (1,)).item()
         for idx, batch in pbar:
-            loss, acc = eval_step(model, batch, loss_fn, accuracy, confusion_matrix)
+            loss, acc, acc5 = eval_step(
+                model, batch, loss_fn, accuracy, accuracy5, confusion_matrix
+            )
             test_loss.update(loss.item())
             pbar.set_postfix(
                 {
                     "test/loss": test_loss.compute().cpu().item(),
-                    "test/accuracy": acc.cpu().item(),
+                    "test/acc": acc.cpu().item(),
+                    "test/acc5": acc5.cpu().item(),
                 }
             )
             tblogger.add_scalar(
-                f"test/accuracy",
+                f"test/acc",
                 acc.cpu().item(),
                 global_step=idx,
             )
-
-            tblogger.add_scalar("test/loss", test_loss.compute(), global_step=idx)
+            tblogger.add_scalar(
+                f"test/acc5",
+                acc5.cpu().item(),
+                global_step=idx,
+            )
+            tblogger.add_scalar(
+                "test/loss", test_loss.compute().cpu().item(), global_step=idx
+            )
 
             if idx == random_index:
                 viz_clip = batch[0].clone().detach()
@@ -323,6 +358,9 @@ def main(config: ListConfig | DictConfig | None = None):
             confusion_matrix.plot(add_text=False)[0],
             global_step=0,
         )
+        log.info(f"Test Accuracy: {acc.cpu().item()}")
+        log.info(f"Test Accuracy@5: {acc5.cpu().item()}")
+        log.info(f"Test Loss: {test_loss.compute().cpu().item()}")
 
 if __name__ == "__main__":
     main()

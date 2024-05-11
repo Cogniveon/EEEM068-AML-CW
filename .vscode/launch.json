@@ -9,7 +9,12 @@
       "type": "debugpy",
       "request": "launch",
       "module": "src.train",
-      "stopOnEntry": true
+      // "stopOnEntry": true,
+      "args": [
+        "only_cpu=true",
+        "batch_size=4",
+        "dataset_splits=[0.001,0.001,0.001,0.997]"
+      ]
     }
   ]
 }
