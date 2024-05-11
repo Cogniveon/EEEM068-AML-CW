@@ -20,7 +20,7 @@ from transformers import (
     VivitImageProcessor,
 )
 
-from src import utils
+from src import models, utils
 from src.dataset import HMDBSIMPDataset
 from src.utils import visualize_predictions
 
@@ -126,30 +126,21 @@ def main(config: ListConfig | DictConfig | None = None):
 
     accelerator = Accelerator(cpu=True if config.only_cpu else False)
 
-    if "vivit" in config.model_name:
-        processor = VivitImageProcessor.from_pretrained(config.model_name)
-    elif "videomae" in config.model_name:
-        processor = VideoMAEImageProcessor.from_pretrained(config.model_name)
-    elif "timesformer" in config.model_name:
-        processor = VideoMAEImageProcessor.from_pretrained(config.model_name)
-    else:
-        processor = AutoImageProcessor.from_pretrained(config.model_name)
     dataset = HMDBSIMPDataset(
         config.dataset_dir,
-        processor=processor,  # type: ignore
-        clip_size=config.clip_size,
+        clip_size=models.get_model_config(config.model_name).get_clip_size(),
     )
 
     train_dataloader, val_dataloader, test_dataloader = prepare_dataloaders(
         dataset, accelerator, config
     )
 
-    model = AutoModelForVideoClassification.from_pretrained(
-        config.model_name,
-        num_labels=dataset.num_classes,
-        ignore_mismatched_sizes=True,
+    model_config = models.get_model_config(config.model_name)(
+        num_classes=dataset.num_classes
     )
+    dataset.set_processor(model_config.get_preprocessor())
 
+    model = model_config.get_model()
     optimizer = AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )

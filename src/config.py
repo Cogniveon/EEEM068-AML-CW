@@ -1,21 +1,21 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from omegaconf import II
+
+from src import models
+
 
 @dataclass
 class Config:
     """Configuration for training a model."""
 
-    model_name: str = "facebook/timesformer-base-finetuned-k400"
+    model_name: str = "timesformer"
     """
-    The name of the model to use. This should be a model from the Hugging Face model hub.
-    Eg: "facebook/timesformer-base-finetuned-k400",
-        "MCG-NJU/videomae-base-finetuned-kinetics",
-        "google/vivit-b-16x2-kinetics400", etc.
+    Eg: "timesformer", "videomae", "vivit", etc.
     """
 
     dataset_dir: str = "datasets/HMDB_simp"
-    clip_size: int = 8
     log_dir: str = "logs"
     only_eval: bool = False
     only_cpu: bool = False

@@ -18,10 +18,8 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
         self,
         path: str | os.PathLike,
-        processor: Optional[VideoMAEImageProcessor | VivitImageProcessor] = None,
         clip_size: int = 8,
     ):
-        self._processor = processor
         self._clip_size = clip_size
 
         log.info("Initializing HMDB_simp dataset")
@@ -58,6 +56,11 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
 
     def __len__(self):
         return len(self.dataset)
+
+    def set_processor(
+        self, processor: Optional[VideoMAEImageProcessor | VivitImageProcessor] = None
+    ):
+        self._processor = processor
 
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         images, label = self.dataset[idx]
