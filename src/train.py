@@ -293,7 +293,9 @@ def main(config: ListConfig | DictConfig | None = None):
                             )
 
                             tblogger.add_scalar(
-                                "val/loss", val_loss.compute(), global_step=idx
+                                "val/loss",
+                                val_loss.compute(),
+                                global_step=global_step,
                             )
                             val_loss.reset()
                             tblogger.flush()
