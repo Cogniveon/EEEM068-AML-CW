@@ -3,6 +3,7 @@ import os
 from typing import Callable
 
 import torch
+import torchmetrics
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from omegaconf import DictConfig, ListConfig, OmegaConf
@@ -54,8 +55,8 @@ def eval_step(
     preds = outputs.logits.argmax(-1)
     return (
         loss,
-        accuracy(preds, targets).item(),
-        confusion_matrix(preds, targets),
+        accuracy.update(preds, targets).item(),
+        confusion_matrix.update(preds, targets),
     )
 
 
@@ -143,16 +144,20 @@ def main(config: ListConfig | DictConfig | None = None):
         steps_per_epoch=len(train_dataloader),
     )
     loss_fn = torch.nn.functional.cross_entropy
-    accuracy = Accuracy(task="multiclass", num_classes=dataset.num_classes or -1)
+    accuracy = Accuracy(
+        task="multiclass",
+        num_classes=dataset.num_classes or -1,
+    ).to(accelerator.device)
     confusion_matrix = ConfusionMatrix(
         task="multiclass", num_classes=dataset.num_classes or -1
-    )
+    ).to(accelerator.device)
+    train_loss = torchmetrics.MeanMetric().to(accelerator.device)
+    val_loss = torchmetrics.MeanMetric().to(accelerator.device)
+    test_loss = torchmetrics.MeanMetric().to(accelerator.device)
 
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
     if type(loss_fn) == torch.nn.Module:
         loss_fn = loss_fn.to(accelerator.device)
-    accuracy = accuracy.to(accelerator.device)
-    confusion_matrix = confusion_matrix.to(accelerator.device)
 
     if config.checkpoint is not None:
         accelerator.load_state(config.checkpoint)
@@ -160,9 +165,6 @@ def main(config: ListConfig | DictConfig | None = None):
     if not config.only_eval:
         global_step = -1
         for epoch in range(config.num_epochs):
-            accuracy.reset()
-            confusion_matrix.reset()
-
             with tqdm(
                 enumerate(train_dataloader),
                 total=len(train_dataloader),
@@ -174,6 +176,7 @@ def main(config: ListConfig | DictConfig | None = None):
                     optimizer.zero_grad()
                     loss, preds = train_step(model, batch, loss_fn, return_preds=True)
                     accelerator.backward(loss)
+                    train_loss.update(loss.item())
                     optimizer.step()
                     scheduler.step()
 
@@ -196,8 +199,9 @@ def main(config: ListConfig | DictConfig | None = None):
 
                     if idx % max(int(len(train_dataloader) / config.log_freq), 1) == 0:
                         tblogger.add_scalar(
-                            "train/loss", loss.cpu().item(), global_step=idx
+                            "train/loss", train_loss.compute(), global_step=idx
                         )
+                        train_loss.reset()
                         tblogger.add_scalar(
                             "lr", scheduler.get_last_lr()[0], global_step=global_step
                         )
@@ -215,6 +219,7 @@ def main(config: ListConfig | DictConfig | None = None):
                         loss, acc, confmat = eval_step(
                             model, batch, loss_fn, accuracy, confusion_matrix
                         )
+                        val_loss.update(loss.item())
                         pbar.set_postfix(
                             {
                                 "val/accuracy": acc,
@@ -241,11 +246,12 @@ def main(config: ListConfig | DictConfig | None = None):
                                 accuracy.compute().cpu().item(),
                                 global_step=global_step,
                             )
+                            accuracy.reset()
+
                             tblogger.add_scalar(
-                                f"val/loss",
-                                loss.cpu().item(),
-                                global_step=global_step,
+                                "val/loss", val_loss.compute(), global_step=idx
                             )
+                            val_loss.reset()
                             tblogger.flush()
 
                     # Plot confusion matrix at the end of validation
@@ -254,6 +260,7 @@ def main(config: ListConfig | DictConfig | None = None):
                         confusion_matrix.plot(add_text=False)[0],
                         global_step=global_step,
                     )
+                    confusion_matrix.reset()
 
                 accelerator.save_state(
                     os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
@@ -271,6 +278,7 @@ def main(config: ListConfig | DictConfig | None = None):
             loss, acc, confmat = eval_step(
                 model, batch, loss_fn, accuracy, confusion_matrix
             )
+            test_loss.update(loss.item())
             pbar.set_postfix(
                 {
                     "test/accuracy": acc,
@@ -293,18 +301,17 @@ def main(config: ListConfig | DictConfig | None = None):
                 accuracy.compute().cpu().item(),
                 global_step=idx,
             )
+            accuracy.reset()
 
-            tblogger.add_scalar(
-                f"test/loss",
-                loss.cpu().item(),
-                global_step=idx,
-            )
+            tblogger.add_scalar("test/loss", test_loss.compute(), global_step=idx)
+            test_loss.reset()
 
         tblogger.add_figure(
             f"test/confusion_matrix",
             confusion_matrix.plot(add_text=False)[0],
             global_step=0,
         )
+        confusion_matrix.reset()
 
 if __name__ == "__main__":
     main()
