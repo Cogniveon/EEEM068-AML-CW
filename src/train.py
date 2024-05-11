@@ -362,6 +362,18 @@ def main(config: ListConfig | DictConfig | None = None):
             confusion_matrix.plot(add_text=False)[0],
             global_step=0,
         )
+        tblogger.add_text(
+            "metrics",
+            """Test Accuracy: {acc:0.2f}
+Test Accuracy@5: {acc5:0.2f}
+Test Loss: {loss:0.2f}""".format(
+                acc=acc.cpu().item(),
+                acc5=acc5.cpu().item(),
+                loss=test_loss.compute().cpu().item(),
+            ),
+            global_step=0,
+        )
+        tblogger.flush()
         log.info(f"Test Accuracy: {acc.cpu().item()}")
         log.info(f"Test Accuracy@5: {acc5.cpu().item()}")
         log.info(f"Test Loss: {test_loss.compute().cpu().item()}")
