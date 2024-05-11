@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Callable
 
 import torch
@@ -201,6 +202,12 @@ def main(config: ListConfig | DictConfig | None = None):
                         metric.compute().cpu().item(),
                         global_step=global_step,
                     )
+
+                accelerator.save_state(
+                    os.path.join(
+                        str(tblogger.logdir), "checkpoints", f"epoch_{epoch}.pt"
+                    )
+                )
 
             metric.reset()
             scheduler.step()
