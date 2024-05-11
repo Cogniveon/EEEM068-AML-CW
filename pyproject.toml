@@ -11,8 +11,14 @@ dependencies = [
   "accelerate==0.30.0",
   "transformers==4.40.1",
   "datasets==2.19.0",
+  "moviepy",
+  "tensorboard",
+  "torch-tb-profiler",
   "tensorboardx==2.6.2.2",
-  "matplotlib","rich", "torchmetrics", "omegaconf"
+  "matplotlib",
+  "rich",
+  "torchmetrics",
+  "omegaconf"
 ]
 readme = "README.md"
 requires-python = ">= 3.8"

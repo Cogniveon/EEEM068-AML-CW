@@ -79,6 +79,7 @@ def setup_logging(config: ListConfig | DictConfig):
     logging.getLogger("src").setLevel(logging.DEBUG)
     logging.getLogger("src.dataset").setLevel(logging.INFO)
     warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub")
+    warnings.filterwarnings("ignore", category=SyntaxWarning, module="moviepy")
 
 
 def get_config() -> ListConfig | DictConfig:

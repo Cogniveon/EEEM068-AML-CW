@@ -7,6 +7,8 @@
 #   all-features: false
 #   with-sources: false
 
+absl-py==2.1.0
+    # via tensorboard
 accelerate==0.30.0
 aiohttp==3.9.5
     # via datasets
@@ -31,6 +33,8 @@ contourpy==1.2.1
 cycler==0.12.1
     # via matplotlib
 datasets==2.19.0
+decorator==4.4.2
+    # via moviepy
 dill==0.3.8
     # via datasets
     # via multiprocess
@@ -50,6 +54,8 @@ fsspec==2024.3.1
     # via huggingface-hub
     # via torch
 gdown==5.1.0
+grpcio==1.63.0
+    # via tensorboard
 huggingface-hub==0.23.0
     # via accelerate
     # via datasets
@@ -58,6 +64,10 @@ huggingface-hub==0.23.0
 idna==3.7
     # via requests
     # via yarl
+imageio==2.34.1
+    # via moviepy
+imageio-ffmpeg==0.4.9
+    # via moviepy
 isort==5.13.2
 jinja2==3.1.3
     # via torch
@@ -65,13 +75,17 @@ kiwisolver==1.4.5
     # via matplotlib
 lightning-utilities==0.11.2
     # via torchmetrics
+markdown==3.6
+    # via tensorboard
 markdown-it-py==3.0.0
     # via rich
 markupsafe==2.1.5
     # via jinja2
+    # via werkzeug
 matplotlib==3.8.4
 mdurl==0.1.2
     # via markdown-it-py
+moviepy==1.0.3
 mpmath==1.3.0
     # via sympy
 multidict==6.0.5
@@ -87,9 +101,12 @@ numpy==1.26.4
     # via accelerate
     # via contourpy
     # via datasets
+    # via imageio
     # via matplotlib
+    # via moviepy
     # via pandas
     # via pyarrow
+    # via tensorboard
     # via tensorboardx
     # via torchmetrics
     # via torchvision
@@ -107,14 +124,19 @@ packaging==24.0
     # via transformers
 pandas==2.2.2
     # via datasets
+    # via torch-tb-profiler
 pathspec==0.12.1
     # via black
 pillow==10.3.0
+    # via imageio
     # via matplotlib
     # via torchvision
 platformdirs==4.2.1
     # via black
+proglog==0.1.10
+    # via moviepy
 protobuf==5.26.1
+    # via tensorboard
     # via tensorboardx
 psutil==5.9.8
     # via accelerate
@@ -145,19 +167,27 @@ requests==2.31.0
     # via datasets
     # via gdown
     # via huggingface-hub
+    # via moviepy
     # via transformers
 rich==13.7.1
 safetensors==0.4.3
     # via accelerate
     # via transformers
 setuptools==69.5.1
+    # via imageio-ffmpeg
     # via lightning-utilities
+    # via tensorboard
 six==1.16.0
     # via python-dateutil
+    # via tensorboard
 soupsieve==2.5
     # via beautifulsoup4
 sympy==1.12
     # via torch
+tensorboard==2.16.2
+    # via torch-tb-profiler
+tensorboard-data-server==0.7.2
+    # via tensorboard
 tensorboardx==2.6.2.2
 tokenizers==0.19.1
     # via transformers
@@ -165,12 +195,15 @@ torch==2.2.2
     # via accelerate
     # via torchmetrics
     # via torchvision
+torch-tb-profiler==0.4.3
 torchmetrics==1.3.2
 torchvision==0.17.2
 tqdm==4.66.4
     # via datasets
     # via gdown
     # via huggingface-hub
+    # via moviepy
+    # via proglog
     # via transformers
 transformers==4.40.1
 typing-extensions==4.11.0
@@ -181,6 +214,8 @@ tzdata==2024.1
     # via pandas
 urllib3==2.2.1
     # via requests
+werkzeug==3.0.3
+    # via tensorboard
 xxhash==3.4.1
     # via datasets
 yarl==1.9.4

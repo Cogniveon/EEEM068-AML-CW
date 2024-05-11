@@ -10,7 +10,7 @@ from tensorboardX import SummaryWriter
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, random_split
-from torchmetrics import Accuracy, Metric
+from torchmetrics import Accuracy, ConfusionMatrix, Metric
 from tqdm.auto import tqdm
 from transformers import AutoImageProcessor, AutoModelForVideoClassification
 
@@ -42,15 +42,21 @@ def train_step(
 def eval_step(
     model: torch.nn.Module,
     batch: tuple[torch.Tensor, torch.Tensor],
-    metric: Metric,
+    loss_fn: torch.nn.Module | Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    accuracy: Metric,
+    confusion_matrix: Metric,
 ):
     """Evaluation step."""
     model.eval()
     inputs, targets = batch
     outputs = model(inputs)
+    loss = loss_fn(outputs.logits, targets)
     preds = outputs.logits.argmax(-1)
-    result = metric(preds, targets)
-    return result.cpu().item()
+    return (
+        loss,
+        accuracy(preds, targets).item(),
+        confusion_matrix(preds, targets),
+    )
 
 
 def prepare_dataloaders(
@@ -123,6 +129,8 @@ def main(config: ListConfig | DictConfig | None = None):
 
     model = AutoModelForVideoClassification.from_pretrained(
         config.model_name,
+        num_labels=dataset.num_classes,
+        ignore_mismatched_sizes=True,
     )
 
     optimizer = AdamW(
@@ -135,12 +143,16 @@ def main(config: ListConfig | DictConfig | None = None):
         steps_per_epoch=len(train_dataloader),
     )
     loss_fn = torch.nn.functional.cross_entropy
-    metric = Accuracy(task="multiclass", num_classes=dataset.num_classes or -1)
+    accuracy = Accuracy(task="multiclass", num_classes=dataset.num_classes or -1)
+    confusion_matrix = ConfusionMatrix(
+        task="multiclass", num_classes=dataset.num_classes or -1
+    )
 
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
     if type(loss_fn) == torch.nn.Module:
         loss_fn = loss_fn.to(accelerator.device)
-    metric = metric.to(accelerator.device)
+    accuracy = accuracy.to(accelerator.device)
+    confusion_matrix = confusion_matrix.to(accelerator.device)
 
     if config.checkpoint is not None:
         accelerator.load_state(config.checkpoint)
@@ -148,30 +160,38 @@ def main(config: ListConfig | DictConfig | None = None):
     if not config.only_eval:
         global_step = -1
         for epoch in range(config.num_epochs):
+            accuracy.reset()
+            confusion_matrix.reset()
+
             with tqdm(
                 enumerate(train_dataloader),
                 total=len(train_dataloader),
                 desc=f"Epoch {epoch + 1}",
             ) as pbar:
+                random_index = torch.randint(0, len(train_dataloader), (1,)).item()
                 for idx, batch in pbar:
                     global_step += 1
                     optimizer.zero_grad()
                     loss, preds = train_step(model, batch, loss_fn, return_preds=True)
                     accelerator.backward(loss)
                     optimizer.step()
+                    scheduler.step()
 
                     pbar.set_postfix(
-                        {"train/loss": loss.cpu().item(), "lr": scheduler.get_last_lr()}
+                        {
+                            "train/loss": loss.cpu().item(),
+                            "lr": scheduler.get_last_lr()[0],
+                        }
                     )
-                    if idx == 0 and epoch == 0:
-                        viz_clip = batch[0].clone().detach().cpu()
-                        visualize_predictions(viz_clip, preds, batch[1])
+                    if idx == random_index:
+                        viz_clip = batch[0].clone().detach()
+                        preds = model(viz_clip).logits.argmax(-1)
                         viz_clip = visualize_predictions(viz_clip, preds, batch[1])
 
                         tblogger.add_video(
-                            f"train_batch_sample_0",
+                            f"train_batch_sample",
                             viz_clip,
-                            global_step=global_step,
+                            global_step=epoch,
                         )
 
                     if idx % max(int(len(train_dataloader) / config.log_freq), 1) == 0:
@@ -179,27 +199,59 @@ def main(config: ListConfig | DictConfig | None = None):
                             "train/loss", loss.cpu().item(), global_step=idx
                         )
                         tblogger.add_scalar(
-                            "lr", scheduler.get_last_lr(), global_step=idx
+                            "lr", scheduler.get_last_lr()[0], global_step=global_step
                         )
+                        tblogger.flush()
 
             if epoch % config.eval_freq == 0 or epoch == config.num_epochs - 1:
-                global_step += 1
                 with tqdm(
                     enumerate(val_dataloader),
                     total=len(val_dataloader),
                     desc=f"Validating {epoch + 1}",
                 ) as pbar:
+                    random_index = torch.randint(0, len(val_dataloader), (1,)).item()
                     for idx, batch in pbar:
-                        accuracy = eval_step(model, batch, metric)
+                        global_step += 1
+                        loss, acc, confmat = eval_step(
+                            model, batch, loss_fn, accuracy, confusion_matrix
+                        )
                         pbar.set_postfix(
                             {
-                                f"val/{metric.__class__.__name__.lower()}": accuracy,
+                                "val/accuracy": acc,
                             }
                         )
 
-                    tblogger.add_scalar(
-                        f"val/{metric.__class__.__name__.lower()}",
-                        metric.compute().cpu().item(),
+                        if idx == random_index:
+                            viz_clip = batch[0].clone().detach()
+                            preds = model(viz_clip).logits.argmax(-1)
+                            viz_clip = visualize_predictions(viz_clip, preds, batch[1])
+
+                            tblogger.add_video(
+                                f"val_batch_sample",
+                                viz_clip,
+                                global_step=epoch,
+                            )
+
+                        if (
+                            idx % max(int(len(train_dataloader) / config.log_freq), 1)
+                            == 0
+                        ):
+                            tblogger.add_scalar(
+                                f"val/accuracy",
+                                accuracy.compute().cpu().item(),
+                                global_step=global_step,
+                            )
+                            tblogger.add_scalar(
+                                f"val/loss",
+                                loss.cpu().item(),
+                                global_step=global_step,
+                            )
+                            tblogger.flush()
+
+                    # Plot confusion matrix at the end of validation
+                    tblogger.add_figure(
+                        f"val/confusion_matrix",
+                        confusion_matrix.plot(add_text=False)[0],
                         global_step=global_step,
                     )
 
@@ -207,26 +259,51 @@ def main(config: ListConfig | DictConfig | None = None):
                     os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
                 )
 
-            metric.reset()
-            scheduler.step()
-
+    accuracy.reset()
+    confusion_matrix.reset()
     with tqdm(
         enumerate(test_dataloader),
         total=len(test_dataloader),
         desc=f"Testing",
     ) as pbar:
+        random_index = torch.randint(0, len(test_dataloader), (1,)).item()
         for idx, batch in pbar:
-            accuracy = eval_step(model, batch, metric)
+            loss, acc, confmat = eval_step(
+                model, batch, loss_fn, accuracy, confusion_matrix
+            )
             pbar.set_postfix(
                 {
-                    f"test/{metric.__class__.__name__.lower()}": accuracy,
+                    "test/accuracy": acc,
                 }
             )
 
-        tblogger.add_scalar(
-            f"test/{metric.__class__.__name__.lower()}",
-            metric.compute().cpu().item(),
-            global_step=global_step,
+            if idx == random_index:
+                viz_clip = batch[0].clone().detach()
+                preds = model(viz_clip).logits.argmax(-1)
+                viz_clip = visualize_predictions(viz_clip, preds, batch[1])
+
+                tblogger.add_video(
+                    f"test_batch_sample",
+                    viz_clip,
+                    global_step=0,
+                )
+
+            tblogger.add_scalar(
+                f"test/accuracy",
+                accuracy.compute().cpu().item(),
+                global_step=idx,
+            )
+
+            tblogger.add_scalar(
+                f"test/loss",
+                loss.cpu().item(),
+                global_step=idx,
+            )
+
+        tblogger.add_figure(
+            f"test/confusion_matrix",
+            confusion_matrix.plot(add_text=False)[0],
+            global_step=0,
         )
 
 if __name__ == "__main__":
