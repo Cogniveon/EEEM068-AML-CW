@@ -204,9 +204,7 @@ def main(config: ListConfig | DictConfig | None = None):
                     )
 
                 accelerator.save_state(
-                    os.path.join(
-                        str(tblogger.logdir), "checkpoints", f"epoch_{epoch}.pt"
-                    )
+                    os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
                 )
 
             metric.reset()
