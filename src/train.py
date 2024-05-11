@@ -13,7 +13,12 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, random_split
 from torchmetrics import Accuracy, ConfusionMatrix, Metric
 from tqdm.auto import tqdm
-from transformers import AutoImageProcessor, AutoModelForVideoClassification
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForVideoClassification,
+    VideoMAEImageProcessor,
+    VivitImageProcessor,
+)
 
 from src import utils
 from src.dataset import HMDBSIMPDataset
@@ -119,10 +124,21 @@ def main(config: ListConfig | DictConfig | None = None):
     )
     log.info(f"Configuration: {OmegaConf.to_container(config, resolve=True)}")
 
-    accelerator = Accelerator()
+    accelerator = Accelerator(cpu=True if config.only_cpu else False)
 
-    processor = AutoImageProcessor.from_pretrained(config.model_name)
-    dataset = HMDBSIMPDataset(config.dataset_dir, processor=processor)
+    if "vivit" in config.model_name:
+        processor = VivitImageProcessor.from_pretrained(config.model_name)
+    elif "videomae" in config.model_name:
+        processor = VideoMAEImageProcessor.from_pretrained(config.model_name)
+    elif "timesformer" in config.model_name:
+        processor = VideoMAEImageProcessor.from_pretrained(config.model_name)
+    else:
+        processor = AutoImageProcessor.from_pretrained(config.model_name)
+    dataset = HMDBSIMPDataset(
+        config.dataset_dir,
+        processor=processor,  # type: ignore
+        clip_size=config.clip_size,
+    )
 
     train_dataloader, val_dataloader, test_dataloader = prepare_dataloaders(
         dataset, accelerator, config

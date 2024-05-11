@@ -8,7 +8,7 @@ import torch
 import torchvision.transforms.v2 as T
 from PIL import Image
 from torch.utils.data import Dataset
-from transformers import VideoMAEImageProcessor
+from transformers import VideoMAEImageProcessor, VivitImageProcessor
 
 log = logging.getLogger(__name__)
 
@@ -18,9 +18,11 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
         self,
         path: str | os.PathLike,
-        processor: Optional[VideoMAEImageProcessor] = None,
+        processor: Optional[VideoMAEImageProcessor | VivitImageProcessor] = None,
+        clip_size: int = 8,
     ):
         self._processor = processor
+        self._clip_size = clip_size
 
         log.info("Initializing HMDB_simp dataset")
         self.dataset: list[tuple[np.ndarray, int]] = []
@@ -31,7 +33,7 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
                     f"Processing video {video_folder}: {os.path.join(label_folder, video_folder)}"
                 )
                 for idx, clip in self.process_video(
-                    os.path.join(label_folder, video_folder)
+                    os.path.join(label_folder, video_folder), self._clip_size
                 ):
                     log.debug(
                         f"Adding video clip {video_folder}/{idx}; frames: {idx * 8}-{(idx + 1) * 8}"
