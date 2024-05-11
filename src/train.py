@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torchmetrics
@@ -43,7 +43,7 @@ def eval_step(
     batch: tuple[torch.Tensor, torch.Tensor],
     loss_fn: torch.nn.Module | Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     accuracy: Metric,
-    confusion_matrix: Metric,
+    confusion_matrix: Optional[Metric] = None,
 ):
     """Evaluation step."""
     model.eval()
@@ -51,11 +51,10 @@ def eval_step(
     outputs = model(inputs)
     loss = loss_fn(outputs.logits, targets)
     preds = outputs.logits.argmax(-1)
-    return (
-        loss,
-        accuracy.update(preds, targets).item(),
-        confusion_matrix.update(preds, targets),
-    )
+    accuracy.update(preds, targets)
+    if confusion_matrix is not None:
+        confusion_matrix.update(preds, targets)
+    return loss, accuracy.compute()
 
 
 def prepare_dataloaders(
@@ -170,9 +169,6 @@ def main(config: ListConfig | DictConfig | None = None):
         task="multiclass",
         num_classes=dataset.num_classes or -1,
     ).to(accelerator.device)
-    confusion_matrix = ConfusionMatrix(
-        task="multiclass", num_classes=dataset.num_classes or -1
-    ).to(accelerator.device)
     train_loss = torchmetrics.MeanMetric().to(accelerator.device)
     val_loss = torchmetrics.MeanMetric().to(accelerator.device)
     test_loss = torchmetrics.MeanMetric().to(accelerator.device)
@@ -240,13 +236,11 @@ def main(config: ListConfig | DictConfig | None = None):
                     random_index = torch.randint(0, len(val_dataloader), (1,)).item()
                     for idx, batch in pbar:
                         global_step += 1
-                        loss, acc, confmat = eval_step(
-                            model, batch, loss_fn, accuracy, confusion_matrix
-                        )
+                        loss, acc = eval_step(model, batch, loss_fn, accuracy)
                         val_loss.update(loss.item())
                         pbar.set_postfix(
                             {
-                                "val/accuracy": acc,
+                                "val/accuracy": acc.cpu().item(),
                             }
                         )
 
@@ -269,7 +263,7 @@ def main(config: ListConfig | DictConfig | None = None):
                         ):
                             tblogger.add_scalar(
                                 f"val/accuracy",
-                                accuracy.compute().cpu().item(),
+                                acc.cpu().item(),
                                 global_step=global_step,
                             )
 
@@ -279,20 +273,16 @@ def main(config: ListConfig | DictConfig | None = None):
                             val_loss.reset()
                             tblogger.flush()
 
-                    # Plot confusion matrix at the end of validation
-                    tblogger.add_figure(
-                        f"val/confusion_matrix",
-                        confusion_matrix.plot(add_text=False)[0],
-                        global_step=global_step,
-                    )
-                    log.info(f"Confusion matrix: {confusion_matrix.compute()}")
                     log.info(f"Accuracy: {accuracy.compute()}")
                     accuracy.reset()
-                    confusion_matrix.reset()
 
                 accelerator.save_state(
                     os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
                 )
+
+    confusion_matrix = ConfusionMatrix(
+        task="multiclass", num_classes=dataset.num_classes or -1
+    ).to(accelerator.device)
 
     with tqdm(
         enumerate(test_dataloader),
@@ -301,15 +291,21 @@ def main(config: ListConfig | DictConfig | None = None):
     ) as pbar:
         random_index = torch.randint(0, len(test_dataloader), (1,)).item()
         for idx, batch in pbar:
-            loss, acc, confmat = eval_step(
-                model, batch, loss_fn, accuracy, confusion_matrix
-            )
+            loss, acc = eval_step(model, batch, loss_fn, accuracy, confusion_matrix)
             test_loss.update(loss.item())
             pbar.set_postfix(
                 {
-                    "test/accuracy": acc,
+                    "test/loss": test_loss.compute().cpu().item(),
+                    "test/accuracy": acc.cpu().item(),
                 }
             )
+            tblogger.add_scalar(
+                f"test/accuracy",
+                acc.cpu().item(),
+                global_step=idx,
+            )
+
+            tblogger.add_scalar("test/loss", test_loss.compute(), global_step=idx)
 
             if idx == random_index:
                 viz_clip = batch[0].clone().detach()
@@ -321,14 +317,6 @@ def main(config: ListConfig | DictConfig | None = None):
                     viz_clip,
                     global_step=0,
                 )
-
-            tblogger.add_scalar(
-                f"test/accuracy",
-                accuracy.compute().cpu().item(),
-                global_step=idx,
-            )
-
-            tblogger.add_scalar("test/loss", test_loss.compute(), global_step=idx)
 
         tblogger.add_figure(
             f"test/confusion_matrix",

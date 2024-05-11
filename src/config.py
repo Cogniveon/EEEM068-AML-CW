@@ -3,8 +3,6 @@ from typing import Optional
 
 from omegaconf import II
 
-from src import models
-
 
 @dataclass
 class Config:
