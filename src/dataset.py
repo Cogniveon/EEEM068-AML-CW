@@ -23,6 +23,9 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self._clip_size = clip_size
 
         log.info("Initializing HMDB_simp dataset")
+        log.info(f"Number of classes: {self.num_classes}")
+        log.info(f"Using clip size: {clip_size}")
+        
         self.dataset: list[tuple[np.ndarray, int]] = []
         for label in os.listdir(path):
             log.debug(f"Processing label {label}: {os.path.join(path, label)}")
@@ -57,10 +60,11 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __len__(self):
         return len(self.dataset)
 
-    def set_processor(
-        self, processor: Optional[VideoMAEImageProcessor | VivitImageProcessor] = None
+    def set_preprocessor(
+        self,
+        preprocessor: Optional[VideoMAEImageProcessor | VivitImageProcessor] = None,
     ):
-        self._processor = processor
+        self._preprocessor = preprocessor
 
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         images, label = self.dataset[idx]
@@ -70,7 +74,7 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             image = Image.open(path)
             pil_images.append(image)
 
-        if self._processor != None:
+        if self._preprocessor != None:
             image_transform = T.Compose(
                 [
                     T.Resize((224, 224)),
@@ -78,7 +82,7 @@ class HMDBSIMPDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
                     T.ToDtype(torch.float, scale=True),
                 ]
             )
-            tensors = self._processor.preprocess(pil_images).pixel_values
+            tensors = self._preprocessor.preprocess(pil_images).pixel_values
             tensors = torch.stack([image_transform(image) for image in pil_images])
 
         return tensors, torch.tensor(label)

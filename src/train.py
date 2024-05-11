@@ -13,16 +13,9 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.utils.data import DataLoader, random_split
 from torchmetrics import Accuracy, ConfusionMatrix, Metric
 from tqdm.auto import tqdm
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForVideoClassification,
-    VideoMAEImageProcessor,
-    VivitImageProcessor,
-)
 
 from src import models, utils
 from src.dataset import HMDBSIMPDataset
-from src.utils import visualize_predictions
 
 log = logging.getLogger(__name__)
 
@@ -68,17 +61,17 @@ def eval_step(
 def prepare_dataloaders(
     dataset: HMDBSIMPDataset,
     accelerator: Accelerator,
-    config: DictConfig | ListConfig,
+    batch_size: int,
+    dataset_splits: list[float] = [0.8, 0.1, 0.1],
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
     """Prepare dataloaders."""
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset, config.dataset_splits[:3]
-    )
+    log.info(f"Preparing dataloaders with splits: {dataset_splits}")
+    train_dataset, val_dataset, test_dataset = random_split(dataset, dataset_splits[:3])
 
     train_dataloader = accelerator.prepare_data_loader(
         DataLoader(
             train_dataset,
-            batch_size=config.batch_size,
+            batch_size=batch_size,
             shuffle=True,
         )
     )
@@ -86,7 +79,7 @@ def prepare_dataloaders(
     val_dataloader = accelerator.prepare_data_loader(
         DataLoader(
             val_dataset,
-            batch_size=config.batch_size,
+            batch_size=batch_size,
             shuffle=False,
         )
     )
@@ -94,7 +87,7 @@ def prepare_dataloaders(
     test_dataloader = accelerator.prepare_data_loader(
         DataLoader(
             test_dataset,
-            batch_size=config.batch_size,
+            batch_size=batch_size,
             shuffle=False,
         )
     )
@@ -125,6 +118,7 @@ def main(config: ListConfig | DictConfig | None = None):
     log.info(f"Configuration: {OmegaConf.to_container(config, resolve=True)}")
 
     accelerator = Accelerator(cpu=True if config.only_cpu else False)
+    log.info(f"Using device: {accelerator.device}")
 
     dataset = HMDBSIMPDataset(
         config.dataset_dir,
@@ -132,25 +126,46 @@ def main(config: ListConfig | DictConfig | None = None):
     )
 
     train_dataloader, val_dataloader, test_dataloader = prepare_dataloaders(
-        dataset, accelerator, config
+        dataset, accelerator, config.batch_size, config.dataset_splits
     )
 
     model_config = models.get_model_config(config.model_name)(
         num_classes=dataset.num_classes
     )
-    dataset.set_processor(model_config.get_preprocessor())
 
+    preprocessor = model_config.get_preprocessor()
+    dataset.set_preprocessor(preprocessor)
+    tblogger.add_text(
+        "preprocessor",
+        """{preprocessor}""".format(preprocessor=preprocessor),
+        global_step=0,
+    )
+
+    log.info(f"Fetching model config: {config.model_name}")
     model = model_config.get_model()
-    optimizer = AdamW(
-        model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+
+    log.info(
+        f"Using optimizer: {config.optimizer} with kwargs: {config.optimizer_kwargs}"
     )
-    scheduler = OneCycleLR(
-        optimizer=optimizer,
-        max_lr=config.lr,
-        epochs=config.num_epochs,
-        steps_per_epoch=len(train_dataloader),
+    optimizer = utils.get_optimizer(model, config.optimizer, config.optimizer_kwargs)
+
+    lr_scheduler_kwargs = config.lr_scheduler_kwargs
+    if config.lr_scheduler == "onecycle":
+        lr_scheduler_kwargs.setdefault("max_lr", config.optimizer_kwargs["lr"])
+        lr_scheduler_kwargs.setdefault("steps_per_epoch", len(train_dataloader))
+        lr_scheduler_kwargs.setdefault("epochs", config.num_epochs)
+    log.info(
+        f"Using lr_scheduler: {config.lr_scheduler} with kwargs: {lr_scheduler_kwargs}"
     )
-    loss_fn = torch.nn.functional.cross_entropy
+    scheduler = utils.get_lr_scheduler(
+        optimizer,
+        config.lr_scheduler,
+        **lr_scheduler_kwargs,
+    )
+
+    log.info(f"Using loss function: {config.loss_fn}")
+    loss_fn = getattr(torch.nn.functional, config.loss_fn)
+
     accuracy = Accuracy(
         task="multiclass",
         num_classes=dataset.num_classes or -1,
@@ -196,7 +211,9 @@ def main(config: ListConfig | DictConfig | None = None):
                     if idx == random_index:
                         viz_clip = batch[0].clone().detach()
                         preds = model(viz_clip).logits.argmax(-1)
-                        viz_clip = visualize_predictions(viz_clip, preds, batch[1])
+                        viz_clip = utils.visualize_predictions(
+                            viz_clip, preds, batch[1]
+                        )
 
                         tblogger.add_video(
                             f"train_batch_sample",
@@ -236,7 +253,9 @@ def main(config: ListConfig | DictConfig | None = None):
                         if idx == random_index:
                             viz_clip = batch[0].clone().detach()
                             preds = model(viz_clip).logits.argmax(-1)
-                            viz_clip = visualize_predictions(viz_clip, preds, batch[1])
+                            viz_clip = utils.visualize_predictions(
+                                viz_clip, preds, batch[1]
+                            )
 
                             tblogger.add_video(
                                 f"val_batch_sample",
@@ -253,7 +272,6 @@ def main(config: ListConfig | DictConfig | None = None):
                                 accuracy.compute().cpu().item(),
                                 global_step=global_step,
                             )
-                            accuracy.reset()
 
                             tblogger.add_scalar(
                                 "val/loss", val_loss.compute(), global_step=idx
@@ -267,14 +285,15 @@ def main(config: ListConfig | DictConfig | None = None):
                         confusion_matrix.plot(add_text=False)[0],
                         global_step=global_step,
                     )
+                    log.info(f"Confusion matrix: {confusion_matrix.compute()}")
+                    log.info(f"Accuracy: {accuracy.compute()}")
+                    accuracy.reset()
                     confusion_matrix.reset()
 
                 accelerator.save_state(
                     os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
                 )
 
-    accuracy.reset()
-    confusion_matrix.reset()
     with tqdm(
         enumerate(test_dataloader),
         total=len(test_dataloader),
@@ -295,7 +314,7 @@ def main(config: ListConfig | DictConfig | None = None):
             if idx == random_index:
                 viz_clip = batch[0].clone().detach()
                 preds = model(viz_clip).logits.argmax(-1)
-                viz_clip = visualize_predictions(viz_clip, preds, batch[1])
+                viz_clip = utils.visualize_predictions(viz_clip, preds, batch[1])
 
                 tblogger.add_video(
                     f"test_batch_sample",
@@ -308,17 +327,14 @@ def main(config: ListConfig | DictConfig | None = None):
                 accuracy.compute().cpu().item(),
                 global_step=idx,
             )
-            accuracy.reset()
 
             tblogger.add_scalar("test/loss", test_loss.compute(), global_step=idx)
-            test_loss.reset()
 
         tblogger.add_figure(
             f"test/confusion_matrix",
             confusion_matrix.plot(add_text=False)[0],
             global_step=0,
         )
-        confusion_matrix.reset()
 
 if __name__ == "__main__":
     main()

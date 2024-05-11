@@ -12,6 +12,7 @@ from src.models import ModelConfig, register_model_config
 )
 class VivitModelConfig(ModelConfig):
     def __init__(self, num_classes: int):
+        super().__init__(num_classes)
         self.model: VivitModel = AutoModelForVideoClassification.from_pretrained(
             "google/vivit-b-16x2-kinetics400",
             num_labels=num_classes,

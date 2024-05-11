@@ -1,3 +1,7 @@
+import logging
+
+log = logging.getLogger(__name__)
+
 MODEL_ZOO = {}
 
 
@@ -11,7 +15,8 @@ def register_model_config(name: str):
 
 class ModelConfig:
     def __init__(self, num_classes: int) -> None:
-        pass
+        log.info(f"Initializing model config with {num_classes} classes")
+        self.num_classes = num_classes
 
     def get_preprocessor(self):
         raise NotImplementedError
@@ -25,6 +30,9 @@ class ModelConfig:
 
 
 def get_model_config(name: str) -> type[ModelConfig]:
+    if name not in MODEL_ZOO:
+        raise ValueError(f"Model config {name} not found in {MODEL_ZOO.keys()}")
+
     return MODEL_ZOO[name]
 
 

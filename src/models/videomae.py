@@ -12,6 +12,7 @@ from src.models import ModelConfig, register_model_config
 )
 class VideoMAEModelConfig(ModelConfig):
     def __init__(self, num_classes: int):
+        super().__init__(num_classes)
         self.model: VideoMAEModel = AutoModelForVideoClassification.from_pretrained(
             "MCG-NJU/videomae-base-finetuned-kinetics",
             num_labels=num_classes,

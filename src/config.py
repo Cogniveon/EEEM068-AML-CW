@@ -11,9 +11,7 @@ class Config:
     """Configuration for training a model."""
 
     model_name: str = "timesformer"
-    """
-    Eg: "timesformer", "videomae", "vivit", etc.
-    """
+    """See `get_model_config` in `src/models/__init__.py` for available models."""
 
     dataset_dir: str = "datasets/HMDB_simp"
     log_dir: str = "logs"
@@ -24,7 +22,15 @@ class Config:
     num_epochs: int = 10
     batch_size: int = 4
     seed: int = 6839323
-    lr: float = 1e-4
-    weight_decay: float = 1e-2
+    optimizer: str = "adamw"
+    """See `get_optimizer` in `src/utils.py` for available optimizers."""
+    optimizer_kwargs: dict = field(
+        default_factory=lambda: {"lr": 1e-4, "weight_decay": 1e-2}
+    )
+    lr_scheduler: str = "onecycle"
+    """See `get_lr_scheduler` in `src/utils.py` for available schedulers."""
+    lr_scheduler_kwargs: dict = field(default_factory=lambda: {})
+    loss_fn: str = field(default="cross_entropy")
+    """See `torch.nn.functional` for available loss functions"""
     log_freq: int = 10  # Number of times to log per epoch
     eval_freq: int = 5  # Frequency of the evaluation step

@@ -12,6 +12,7 @@ from src.models import ModelConfig, register_model_config
 )
 class TimesformerModelConfig(ModelConfig):
     def __init__(self, num_classes: int):
+        super().__init__(num_classes)
         self.model: TimesformerModel = AutoModelForVideoClassification.from_pretrained(
             "facebook/timesformer-base-finetuned-k400",
             num_labels=num_classes,
