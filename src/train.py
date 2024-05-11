@@ -106,6 +106,8 @@ def main(config: ListConfig | DictConfig | None = None):
         config = utils.get_config()
 
     utils.setup_logging(config)
+
+    log.info(f"Seed: {config.seed}")
     set_seed(config.seed)
 
     tblogger = SummaryWriter(config.log_dir)
