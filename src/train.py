@@ -192,6 +192,9 @@ def main(config: ListConfig | DictConfig | None = None):
     if config.checkpoint is not None:
         accelerator.load_state(config.checkpoint)
 
+    # visualizer = utils.VisualizeAttention(model)
+    # visualizer.visualize_attention(torch.randn(1, 8, 3, 224, 224))
+
     if not config.only_eval:
         global_step = -1
         for epoch in range(config.num_epochs):
@@ -243,6 +246,11 @@ def main(config: ListConfig | DictConfig | None = None):
                         )
                         tblogger.flush()
 
+                log.info(f"Saving checkpoint for epoch: {epoch}")
+                accelerator.save_state(
+                    os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
+                )
+
             if epoch % config.eval_freq == 0 or epoch == config.num_epochs - 1:
                 with tqdm(
                     enumerate(val_dataloader),
@@ -250,6 +258,7 @@ def main(config: ListConfig | DictConfig | None = None):
                     desc=f"Validating {epoch + 1}",
                 ) as pbar:
                     random_index = torch.randint(0, len(val_dataloader), (1,)).item()
+                    torch.cuda.empty_cache()
                     for idx, batch in pbar:
                         global_step += 1
                         loss, acc, acc5 = eval_step(
@@ -305,11 +314,7 @@ def main(config: ListConfig | DictConfig | None = None):
                     accuracy.reset()
                     accuracy5.reset()
 
-                log.info(f"Saving checkpoint for epoch: {epoch}")
-                accelerator.save_state(
-                    os.path.join(str(tblogger.logdir), "checkpoints", f"epoch_{epoch}")
-                )
-
+    torch.cuda.empty_cache()
     confusion_matrix = ConfusionMatrix(
         task="multiclass", num_classes=dataset.num_classes or -1
     ).to(accelerator.device)
