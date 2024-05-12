@@ -162,6 +162,8 @@ def main(config: ListConfig | DictConfig | None = None):
         lr_scheduler_kwargs.setdefault("max_lr", config.optimizer_kwargs["lr"])
         lr_scheduler_kwargs.setdefault("steps_per_epoch", len(train_dataloader))
         lr_scheduler_kwargs.setdefault("epochs", config.num_epochs)
+    elif config.lr_scheduler == "cosineannealing":
+        lr_scheduler_kwargs.setdefault("T_max", config.num_epochs)
     log.info(
         f"Using lr_scheduler: {config.lr_scheduler} with kwargs: {lr_scheduler_kwargs}"
     )
