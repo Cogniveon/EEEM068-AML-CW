@@ -16,6 +16,8 @@ dependencies = [
   "torch-tb-profiler",
   "tensorboardx==2.6.2.2",
   "matplotlib",
+  "seaborn",
+  "einops",
   "rich",
   "torchmetrics",
   "omegaconf"

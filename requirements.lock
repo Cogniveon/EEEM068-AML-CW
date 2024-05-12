@@ -33,6 +33,7 @@ decorator==4.4.2
 dill==0.3.8
     # via datasets
     # via multiprocess
+einops==0.8.0
 filelock==3.14.0
     # via datasets
     # via huggingface-hub
@@ -75,6 +76,7 @@ markupsafe==2.1.5
     # via jinja2
     # via werkzeug
 matplotlib==3.8.4
+    # via seaborn
 mdurl==0.1.2
     # via markdown-it-py
 moviepy==1.0.3
@@ -96,6 +98,7 @@ numpy==1.26.4
     # via moviepy
     # via pandas
     # via pyarrow
+    # via seaborn
     # via tensorboard
     # via tensorboardx
     # via torchmetrics
@@ -113,6 +116,7 @@ packaging==24.0
     # via transformers
 pandas==2.2.2
     # via datasets
+    # via seaborn
     # via torch-tb-profiler
 pillow==10.3.0
     # via imageio
@@ -155,6 +159,7 @@ rich==13.7.1
 safetensors==0.4.3
     # via accelerate
     # via transformers
+seaborn==0.13.2
 setuptools==69.5.1
     # via imageio-ffmpeg
     # via lightning-utilities

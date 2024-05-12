@@ -18,7 +18,6 @@ class TimesformerModelConfig(ModelConfig):
             num_labels=num_classes,
             ignore_mismatched_sizes=True,
         )
-
         videomae_processor = VideoMAEImageProcessor.from_pretrained(
             "facebook/timesformer-base-finetuned-k400"
         )

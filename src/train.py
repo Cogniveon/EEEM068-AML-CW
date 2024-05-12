@@ -52,13 +52,15 @@ def eval_step(
     outputs = model(inputs)
     loss = loss_fn(outputs.logits, targets)
     preds = outputs.logits.argmax(-1)
-    accuracy.update(preds, targets)
+    accuracy.update(preds.clone().detach().cpu(), targets.clone().detach().cpu())
     accuracy5.update(
-        torch.nn.functional.softmax(outputs.logits, dim=-1),
-        targets,
+        torch.nn.functional.softmax(outputs.logits, dim=-1).clone().detach().cpu(),
+        targets.clone().detach().cpu(),
     )
     if confusion_matrix is not None:
-        confusion_matrix.update(preds, targets)
+        confusion_matrix.update(
+            preds.clone().detach().cpu(), targets.clone().detach().cpu()
+        )
     return loss, accuracy.compute(), accuracy5.compute()
 
 
@@ -175,15 +177,15 @@ def main(config: ListConfig | DictConfig | None = None):
     accuracy = Accuracy(
         task="multiclass",
         num_classes=dataset.num_classes or -1,
-    ).to(accelerator.device)
+    )
     accuracy5 = Accuracy(
         task="multiclass",
         top_k=5,
         num_classes=dataset.num_classes or -1,
-    ).to(accelerator.device)
-    train_loss = torchmetrics.MeanMetric().to(accelerator.device)
-    val_loss = torchmetrics.MeanMetric().to(accelerator.device)
-    test_loss = torchmetrics.MeanMetric().to(accelerator.device)
+    )
+    train_loss = torchmetrics.MeanMetric()
+    val_loss = torchmetrics.MeanMetric()
+    test_loss = torchmetrics.MeanMetric()
 
     model, optimizer, scheduler = accelerator.prepare(model, optimizer, scheduler)
     if type(loss_fn) == torch.nn.Module:
@@ -201,7 +203,7 @@ def main(config: ListConfig | DictConfig | None = None):
             with tqdm(
                 enumerate(train_dataloader),
                 total=len(train_dataloader),
-                desc=f"Epoch {epoch + 1}",
+                desc=f"Train {epoch + 1}",
             ) as pbar:
                 random_index = torch.randint(0, len(train_dataloader), (1,)).item()
                 for idx, batch in pbar:
@@ -209,7 +211,7 @@ def main(config: ListConfig | DictConfig | None = None):
                     optimizer.zero_grad()
                     loss, preds = train_step(model, batch, loss_fn, return_preds=True)
                     accelerator.backward(loss)
-                    train_loss.update(loss.item())
+                    train_loss.update(loss.cpu().item())
                     optimizer.step()
                     scheduler.step()
 
@@ -255,21 +257,21 @@ def main(config: ListConfig | DictConfig | None = None):
                 with tqdm(
                     enumerate(val_dataloader),
                     total=len(val_dataloader),
-                    desc=f"Validating {epoch + 1}",
+                    desc=f"Val {epoch + 1}",
                 ) as pbar:
                     random_index = torch.randint(0, len(val_dataloader), (1,)).item()
-                    torch.cuda.empty_cache()
                     for idx, batch in pbar:
+                        torch.cuda.empty_cache()
                         global_step += 1
                         loss, acc, acc5 = eval_step(
                             model, batch, loss_fn, accuracy, accuracy5
                         )
-                        val_loss.update(loss.item())
+                        val_loss.update(loss.cpu().item())
                         pbar.set_postfix(
                             {
-                                "val/loss": val_loss.compute().cpu().item(),
-                                "val/acc": acc.cpu().item(),
-                                "val/acc5": acc5.cpu().item(),
+                                "val/loss": val_loss.compute().item(),
+                                "val/acc": acc.item(),
+                                "val/acc5": acc5.item(),
                             }
                         )
 
@@ -292,12 +294,12 @@ def main(config: ListConfig | DictConfig | None = None):
                         ):
                             tblogger.add_scalar(
                                 f"val/acc",
-                                acc.cpu().item(),
+                                acc.item(),
                                 global_step=global_step,
                             )
                             tblogger.add_scalar(
                                 f"val/acc5",
-                                acc5.cpu().item(),
+                                acc5.item(),
                                 global_step=global_step,
                             )
 
@@ -309,15 +311,15 @@ def main(config: ListConfig | DictConfig | None = None):
                             val_loss.reset()
                             tblogger.flush()
 
-                    log.info(f"Accuracy: {acc.cpu().item()}")
-                    log.info(f"Accuracy@5: {acc5.cpu().item()}")
+                    log.info(f"Val Accuracy: {accuracy.compute().item()}")
+                    log.info(f"Val Accuracy@5: {accuracy5.compute().item()}")
                     accuracy.reset()
                     accuracy5.reset()
 
     torch.cuda.empty_cache()
     confusion_matrix = ConfusionMatrix(
         task="multiclass", num_classes=dataset.num_classes or -1
-    ).to(accelerator.device)
+    )
 
     with tqdm(
         enumerate(test_dataloader),
@@ -329,26 +331,26 @@ def main(config: ListConfig | DictConfig | None = None):
             loss, acc, acc5 = eval_step(
                 model, batch, loss_fn, accuracy, accuracy5, confusion_matrix
             )
-            test_loss.update(loss.item())
+            test_loss.update(loss.cpu().item())
             pbar.set_postfix(
                 {
-                    "test/loss": test_loss.compute().cpu().item(),
-                    "test/acc": acc.cpu().item(),
-                    "test/acc5": acc5.cpu().item(),
+                    "test/loss": test_loss.compute().item(),
+                    "test/acc": acc.item(),
+                    "test/acc5": acc5.item(),
                 }
             )
             tblogger.add_scalar(
                 f"test/acc",
-                acc.cpu().item(),
+                acc.item(),
                 global_step=idx,
             )
             tblogger.add_scalar(
                 f"test/acc5",
-                acc5.cpu().item(),
+                acc5.item(),
                 global_step=idx,
             )
             tblogger.add_scalar(
-                "test/loss", test_loss.compute().cpu().item(), global_step=idx
+                "test/loss", test_loss.compute().item(), global_step=idx
             )
 
             if idx == random_index:
@@ -372,16 +374,16 @@ def main(config: ListConfig | DictConfig | None = None):
             """Test Accuracy: {acc:0.2f}
 Test Accuracy@5: {acc5:0.2f}
 Test Loss: {loss:0.2f}""".format(
-                acc=acc.cpu().item(),
-                acc5=acc5.cpu().item(),
-                loss=test_loss.compute().cpu().item(),
+                acc=acc.item(),
+                acc5=acc5.item(),
+                loss=test_loss.compute().item(),
             ),
             global_step=0,
         )
         tblogger.flush()
-        log.info(f"Test Accuracy: {acc.cpu().item()}")
-        log.info(f"Test Accuracy@5: {acc5.cpu().item()}")
-        log.info(f"Test Loss: {test_loss.compute().cpu().item()}")
+        log.info(f"Test Accuracy: {accuracy.compute().item()}")
+        log.info(f"Test Accuracy@5: {accuracy5.compute().item()}")
+        log.info(f"Test Loss: {test_loss.compute().item()}")
 
 if __name__ == "__main__":
     main()

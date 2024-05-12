@@ -2,8 +2,11 @@ import logging
 import sys
 import warnings
 
+import numpy as np
 import torch
 import transformers
+from einops import rearrange
+from matplotlib import pyplot as plt
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from rich.logging import RichHandler
 
@@ -119,3 +122,52 @@ def get_lr_scheduler(optimizer, scheduler_name: str, **kwargs):
     if scheduler_name not in schedulers:
         raise ValueError(f"Scheduler {scheduler_name} not found in {schedulers.keys()}")
     return schedulers[scheduler_name](optimizer, **kwargs, last_epoch=-1)
+
+
+class VisualizeAttention:
+    def __init__(self, model: torch.nn.Module) -> None:
+        self.model = model
+        self.hooks = []
+
+    def get_attn_t(self, module, input, output):
+        self.time_attentions.append(output.detach().cpu())
+
+    def get_attn_s(self, module, input, output):
+        self.space_attentions.append(output.detach().cpu())
+
+    def combine_divided_attention(self, attn_t, attn_s):
+        pass
+
+    def visualize_attention(self, inputs: torch.Tensor):
+        self.time_attentions = []
+        self.space_attentions = []
+        self.attentions = []
+
+        for name, m in self.model.named_modules():
+            if "temporal_attn.attn_drop" in name:
+                self.hooks.append(m.register_forward_hook(self.get_attn_t))
+            elif "attn.attn_drop" in name:
+                self.hooks.append(m.register_forward_hook(self.get_attn_s))
+
+        self.model.eval()
+        with torch.no_grad():
+            outputs = self.model(inputs)
+
+        for h in self.hooks:
+            h.remove()
+
+        for attn_t, attn_s in zip(self.time_attentions, self.space_attentions):
+            self.attentions.append(self.combine_divided_attention(attn_t, attn_s))
+
+        p, t = self.attentions[0].shape[0], self.attentions[0].shape[1]
+        result = torch.eye(p * t)
+        for attention in self.attentions:
+            attention = rearrange(attention, "p1 t1 p2 t2 -> (p1 t1) (p2 t2)")
+            result = torch.matmul(attention, result)
+        mask = rearrange(result, "(p1 t1) (p2 t2) -> p1 t1 p2 t2", p1=p, p2=p)
+        mask = mask.mean(dim=1)
+        mask = mask[0, 1:, :]
+        width = int(mask.size(0) ** 0.5)
+        mask = rearrange(mask, "(h w) t -> h w t", w=width).numpy()
+        mask = mask / np.max(mask)
+        # image_masks = self.create_masks(list(rearrange(masks, 'h w t -> t h w')),np_imgs)

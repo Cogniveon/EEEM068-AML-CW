@@ -11,7 +11,8 @@
       "module": "src.train",
       // "stopOnEntry": true,
       "args": [
-        "only_cpu=true",
+        // "only_cpu=true",
+        "only_eval=true",
         "batch_size=4",
         "dataset_splits=[0.001,0.001,0.001,0.997]"
       ]
